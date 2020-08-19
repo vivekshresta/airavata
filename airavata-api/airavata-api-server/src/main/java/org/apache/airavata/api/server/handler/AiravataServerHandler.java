@@ -23,8 +23,12 @@ import org.apache.airavata.accountprovisioning.ConfigParam;
 import org.apache.airavata.accountprovisioning.SSHAccountManager;
 import org.apache.airavata.accountprovisioning.SSHAccountProvisionerFactory;
 import org.apache.airavata.accountprovisioning.SSHAccountProvisionerProvider;
+import org.apache.airavata.agents.api.AgentAdaptor;
+import org.apache.airavata.agents.api.CommandOutput;
+import org.apache.airavata.agents.api.StorageResourceAdaptor;
 import org.apache.airavata.api.Airavata;
 import org.apache.airavata.api.airavata_apiConstants;
+import org.apache.airavata.helix.core.support.adaptor.AdaptorSupportImpl;
 import org.apache.airavata.model.appcatalog.parser.Parser;
 import org.apache.airavata.model.appcatalog.parser.ParsingTemplate;
 import org.apache.airavata.service.security.GatewayGroupsInitializer;
@@ -689,6 +693,43 @@ public class AiravataServerHandler implements Airavata.Iface {
             sharingClientPool.returnBrokenResource(sharingClient);
             registryClientPool.returnBrokenResource(regClient);
             throw exception;
+        }
+    }
+
+    @Override
+    public void validateStorageLimit(AuthzToken authzToken, ExperimentModel experiment, String storageResourceId)
+            throws InvalidRequestException, AiravataClientException, AiravataSystemException, TException {
+        String gatewayId = authzToken.getClaimsMap().get(Constants.GATEWAY_ID);
+        RegistryService.Client regClient = registryClientPool.getResource();
+        String token = "";
+        try {
+            String groupResourceProfileId = experiment.getUserConfigurationData().getGroupResourceProfileId();
+            if (groupResourceProfileId == null) {
+                logger.error("Experiment not configured with a Group Resource Profile: {}", experiment.getExperimentId());
+                AiravataClientException exception = new AiravataClientException();
+                exception.setParameter("Experiment not configured with a Group Resource Profile: " + experiment.getExperimentId());
+                throw exception;
+            }
+
+            token = generateAndRegisterSSHKeys(authzToken, "");
+            StoragePreference storagePreference = regClient.getGatewayStoragePreference(gatewayId, storageResourceId);
+
+            StorageResourceAdaptor adaptor = AdaptorSupportImpl.getInstance().fetchStorageAdaptor(
+                    gatewayId,
+                    storageResourceId,
+                    DataMovementProtocol.SCP,
+                    token,
+                    storagePreference.getLoginUserName());
+            CommandOutput output = adaptor.executeCommand("hostname", "");
+            //CommandOutput output = adaptor.executeCommand("du -s", experiment.getUserConfigurationData().getExperimentDataDir());
+            System.out.println("testing the output: " + output.getStdOut());
+        } catch (Exception ex) {
+            logger.error(ex.getMessage(), ex);
+            AiravataClientException exception = new AiravataClientException();
+            exception.setParameter(ex.getMessage());
+            throw exception;
+        } finally {
+            deleteSSHPubKey(authzToken, token);
         }
     }
 
